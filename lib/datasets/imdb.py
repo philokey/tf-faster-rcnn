@@ -27,7 +27,9 @@ class imdb(object):
       self._classes = []
     else:
       self._classes = classes
+    self._data_path = None
     self._image_index = []
+    self._image_ext = None
     self._obj_proposer = 'gt'
     self._roidb = None
     self._roidb_handler = self.default_roidb
@@ -47,8 +49,16 @@ class imdb(object):
     return self._classes
 
   @property
+  def data_path(self):
+    return self._data_path
+
+  @property
   def image_index(self):
     return self._image_index
+
+  @property
+  def image_ext(self):
+    return self._image_ext
 
   @property
   def roidb_handler(self):

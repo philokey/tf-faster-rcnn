@@ -267,11 +267,17 @@ class Network(object):
 
     return loss
 
-  def create_architecture(self, sess, mode, num_classes, tag=None,
+  def create_architecture(self, sess, mode, num_classes,
+                          image=None, im_info=None, gt_boxes=None, tag=None,
                           anchor_scales=(8, 16, 32), anchor_ratios=(0.5, 1, 2)):
-    self._image = tf.placeholder(tf.float32, shape=[self._batch_size, None, None, 3])
-    self._im_info = tf.placeholder(tf.float32, shape=[self._batch_size, 3])
-    self._gt_boxes = tf.placeholder(tf.float32, shape=[None, 5])
+    if image == None:
+      self._image = tf.placeholder(tf.float32, shape=[self._batch_size, None, None, 3])
+      self._im_info = tf.placeholder(tf.float32, shape=[self._batch_size, 3])
+      self._gt_boxes = tf.placeholder(tf.float32, shape=[None, 5])
+    else:
+      self._image = image
+      self._im_info = im_info # shape of image w, h, 3
+      self._gt_boxes = gt_boxes
     self._tag = tag
 
     self._num_classes = num_classes

@@ -11,6 +11,8 @@ from __future__ import print_function
 import os
 from datasets.imdb import imdb
 import datasets.ds_utils as ds_utils
+from datasets.convert_data import convert_data
+from datasets.preprocess_image import preprocess_image
 import xml.etree.ElementTree as ET
 import numpy as np
 import scipy.sparse
@@ -19,9 +21,12 @@ import utils.cython_bbox
 import pickle
 import subprocess
 import uuid
+import glob
 from .voc_eval import voc_eval
 from model.config import cfg
 
+import tensorflow as tf
+from tensorflow.python.lib.io.tf_record import TFRecordCompressionType
 
 class pascal_voc(imdb):
   def __init__(self, image_set, year, devkit_path=None):
@@ -56,6 +61,7 @@ class pascal_voc(imdb):
       'VOCdevkit path does not exist: {}'.format(self._devkit_path)
     assert os.path.exists(self._data_path), \
       'Path does not exist: {}'.format(self._data_path)
+    convert_data()
 
   def image_path_at(self, i):
     """
@@ -92,6 +98,42 @@ class pascal_voc(imdb):
     Return the default path where PASCAL VOC is expected to be installed.
     """
     return os.path.join(cfg.DATA_DIR, 'VOCdevkit' + self._year)
+
+  def read_tfrecords(self):
+    file_pattern = self.name + '*.tfrecord'
+    tfrecords_filename = glob.glob(self._data_path + '/records/' + file_pattern)
+    if not isinstance(tfrecords_filename, list):
+      tfrecords_filename = [tfrecords_filename]
+    filename_queue = tf.train.string_input_producer(
+      tfrecords_filename, num_epochs=100)
+
+    options = tf.python_io.TFRecordOptions(TFRecordCompressionType.ZLIB)
+    reader = tf.TFRecordReader(options=options)
+    _, serialized_example = reader.read(filename_queue)
+    features = tf.parse_single_example(
+      serialized_example,
+      features={
+        'image/encoded': tf.FixedLenFeature([], tf.string),
+        'image/height': tf.FixedLenFeature([], tf.int64),
+        'image/width': tf.FixedLenFeature([], tf.int64),
+        'label/num_instances': tf.FixedLenFeature([], tf.int64),
+        'label/gt_boxes': tf.FixedLenFeature([], tf.string),
+      })
+    # image = tf.image.decode_jpeg(features['image/encoded'], channels=3)
+    ih = tf.cast(features['image/height'], tf.int32)
+    iw = tf.cast(features['image/width'], tf.int32)
+    num_instances = tf.cast(features['label/num_instances'], tf.int32)
+    image = tf.decode_raw(features['image/encoded'], tf.uint8)
+    imsize = tf.size(image)
+    image = tf.cond(tf.equal(imsize, ih * iw),
+                    lambda: tf.image.grayscale_to_rgb(tf.reshape(image, (ih, iw, 1))),
+                    lambda: tf.reshape(image, (ih, iw, 3)))
+
+    gt_boxes = tf.decode_raw(features['label/gt_boxes'], tf.float32)
+    gt_boxes = tf.reshape(gt_boxes, [num_instances, 5])
+    is_training = 'train' in self.name
+    image, gt_boxes = preprocess_image(image, gt_boxes, is_training)
+    return image, ih, iw, gt_boxes, num_instances
 
   def gt_roidb(self):
     """

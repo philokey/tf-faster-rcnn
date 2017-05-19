@@ -95,14 +95,32 @@ class SolverWrapper(object):
     self.data_layer = RoIDataLayer(self.roidb, self.imdb.num_classes)
     self.data_layer_val = RoIDataLayer(self.valroidb, self.imdb.num_classes, random=True)
 
+    image, ih, iw, gt_boxes, num_instances = self.imdb.read_tfrecords()
+    data_queue = tf.RandomShuffleQueue(capacity=32, min_after_dequeue=16,
+                                       dtypes=(
+                                         image.dtype, ih.dtype, iw.dtype,
+                                         gt_boxes.dtype, num_instances.dtype))
+    enqueue_op = data_queue.enqueue((image, ih, iw, gt_boxes, num_instances))
+    data_queue_runner = tf.train.QueueRunner(data_queue, [enqueue_op] * 4)
+    tf.add_to_collection(tf.GraphKeys.QUEUE_RUNNERS, data_queue_runner)
+    (image, ih, iw, gt_boxes, num_instances) = data_queue.dequeue()
+    im_shape = tf.shape(image)
+    image = tf.reshape(image, (im_shape[0], im_shape[1], im_shape[2], 3))
+
     # Determine different scales for anchors, see paper
     with sess.graph.as_default():
       # Set the random seed for tensorflow
       tf.set_random_seed(cfg.RNG_SEED)
       # Build the main computation graph
-      layers = self.net.create_architecture(sess, 'TRAIN', self.imdb.num_classes, tag='default',
+      layers = self.net.create_architecture(sess, 'TRAIN', self.imdb.num_classes,
+                                            image=image,
+                                            im_info=tf.expand_dims(im_shape[1:], dim=0),
+                                            gt_boxes=gt_boxes, tag='default',
                                             anchor_scales=cfg.ANCHOR_SCALES,
                                             anchor_ratios=cfg.ANCHOR_RATIOS)
+      # layers = self.net.create_architecture(sess, 'TRAIN', self.imdb.num_classes, tag='default',
+      #                                       anchor_scales=cfg.ANCHOR_SCALES,
+      #                                       anchor_ratios=cfg.ANCHOR_RATIOS)
       # Define the loss
       loss = layers['total_loss']
       # Set learning rate and momentum
@@ -249,6 +267,16 @@ class SolverWrapper(object):
         else:
           sess.run(tf.assign(lr, cfg.TRAIN.LEARNING_RATE))
 
+    ## main loop
+    coord = tf.train.Coordinator()
+    threads = []
+    # print (tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS))
+    for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
+      threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
+                                       start=True))
+
+    tf.train.start_queue_runners(sess=sess, coord=coord)
+
     timer = Timer()
     iter = last_snapshot_iter + 1
     last_summary_time = time.time()
@@ -317,6 +345,9 @@ class SolverWrapper(object):
             ss_paths.remove(sfile)
 
       iter += 1
+      if coord.should_stop():
+        coord.request_stop()
+        coord.join(threads)
 
     if last_snapshot_iter != iter - 1:
       self.snapshot(sess, iter - 1)

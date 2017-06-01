@@ -25,7 +25,7 @@ def proposal_target_layer(rpn_rois, rpn_scores, gt_boxes, _num_classes):
   # (i.e., rpn.proposal_layer.ProposalLayer), or any other source
   all_rois = rpn_rois
   all_scores = rpn_scores
-
+  # print(gt_boxes)
   # Include ground-truth boxes in the set of candidate rois
   if cfg.TRAIN.USE_GT:
     zeros = np.zeros((gt_boxes.shape[0], 1), dtype=gt_boxes.dtype)

@@ -92,21 +92,23 @@ class SolverWrapper(object):
 
   def train_model(self, sess, max_iters):
     # Build data layers for both training and validation set
-    self.data_layer = RoIDataLayer(self.roidb, self.imdb.num_classes)
-    self.data_layer_val = RoIDataLayer(self.valroidb, self.imdb.num_classes, random=True)
+    # self.data_layer = RoIDataLayer(self.roidb, self.imdb.num_classes)
+    # self.data_layer_val = RoIDataLayer(self.valroidb, self.imdb.num_classes, random=True)
 
-    image, ih, iw, gt_boxes, num_instances = self.imdb.read_tfrecords()
+    image, gt_boxes = self.imdb.read_tfrecords()
+    print(image, gt_boxes, '!!!!!!!!!!!!!!!!!!!')
     data_queue = tf.RandomShuffleQueue(capacity=32, min_after_dequeue=16,
-                                       dtypes=(
-                                         image.dtype, ih.dtype, iw.dtype,
-                                         gt_boxes.dtype, num_instances.dtype))
-    enqueue_op = data_queue.enqueue((image, ih, iw, gt_boxes, num_instances))
+                                       dtypes=(image.dtype, gt_boxes.dtype))
+    enqueue_op = data_queue.enqueue((image, gt_boxes))
     data_queue_runner = tf.train.QueueRunner(data_queue, [enqueue_op] * 4)
     tf.add_to_collection(tf.GraphKeys.QUEUE_RUNNERS, data_queue_runner)
-    (image, ih, iw, gt_boxes, num_instances) = data_queue.dequeue()
+    image, gt_boxes = data_queue.dequeue()
+    print(image, gt_boxes, 'xxxxxxxxxxxxxxxxxxx')
     im_shape = tf.shape(image)
-    image = tf.reshape(image, (im_shape[0], im_shape[1], im_shape[2], 3))
-
+    gt_shape = tf.shape(gt_boxes)
+    print(im_shape, gt_shape)
+    image = tf.reshape(image, (1, im_shape[1], im_shape[2], 3))
+    gt_boxes = tf.reshape(gt_boxes, (gt_shape[0], 5))
     # Determine different scales for anchors, see paper
     with sess.graph.as_default():
       # Set the random seed for tensorflow
@@ -196,7 +198,6 @@ class SolverWrapper(object):
         if v.name.split(':')[0] in var_keep_dic:
           print('Varibles restored: %s' % v.name)
           variables_to_restore.append(v)
-
       restorer = tf.train.Saver(variables_to_restore)
       restorer.restore(sess, self.pretrained_model)
       print('Loaded.')
@@ -256,10 +257,10 @@ class SolverWrapper(object):
         last_snapshot_iter = pickle.load(fid)
 
         np.random.set_state(st0)
-        self.data_layer._cur = cur
-        self.data_layer._perm = perm
-        self.data_layer_val._cur = cur_val
-        self.data_layer_val._perm = perm_val
+        # self.data_layer._cur = cur
+        # self.data_layer._perm = perm
+        # self.data_layer_val._cur = cur_val
+        # self.data_layer_val._perm = perm_val
 
         # Set the learning rate, only reduce once
         if last_snapshot_iter > cfg.TRAIN.STEPSIZE:
@@ -289,25 +290,25 @@ class SolverWrapper(object):
 
       timer.tic()
       # Get training data, one batch at a time
-      blobs = self.data_layer.forward()
-
+      # blobs = self.data_layer.forward()
+      # print(iter)
       now = time.time()
       if now - last_summary_time > cfg.TRAIN.SUMMARY_INTERVAL:
         # Compute the graph with summary
         rpn_loss_cls, rpn_loss_box, loss_cls, loss_box, total_loss, summary = \
-          self.net.train_step_with_summary(sess, blobs, train_op)
+          self.net.train_step_with_summary(sess, train_op)
         self.writer.add_summary(summary, float(iter))
         # Also check the summary on the validation set
-        blobs_val = self.data_layer_val.forward()
-        summary_val = self.net.get_summary(sess, blobs_val)
-        self.valwriter.add_summary(summary_val, float(iter))
+        # blobs_val = self.data_layer_val.forward()
+        # summary_val = self.net.get_summary(sess, blobs_val)
+        # self.valwriter.add_summary(summary_val, float(iter))
         last_summary_time = now
       else:
         # Compute the graph without summary
         rpn_loss_cls, rpn_loss_box, loss_cls, loss_box, total_loss = \
-          self.net.train_step(sess, blobs, train_op)
+          self.net.train_step(sess, train_op)
       timer.toc()
-
+      # print('loss', total_loss)
       # Display training information
       if iter % (cfg.TRAIN.DISPLAY) == 0:
         print('iter: %d / %d, total loss: %.6f\n >>> rpn_loss_cls: %.6f\n '

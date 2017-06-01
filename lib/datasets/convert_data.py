@@ -16,6 +16,7 @@ import six
 import os.path as osp
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.lib.io.tf_record import TFRecordCompressionType
 
 _NUM_SHARDS = 5
 
@@ -24,9 +25,9 @@ class ImageReader(object):
   def __init__(self, image_ext):
     # Initializes function that decodes RGB JPEG data.
     self._decode_image_data = tf.placeholder(dtype=tf.string)
-    if image_ext == 'jpg':
+    if image_ext == '.jpg':
       self._decode_image = tf.image.decode_jpeg(self._decode_image_data, channels=3)
-    elif image_ext == 'png':
+    elif image_ext == '.png':
       self._decode_image = tf.image.decode_png(self._decode_image_data, channels=3)
     else:
       raise ValueError('image_ext can only jpg or png')
@@ -87,12 +88,13 @@ def convert_data(imdb):
   split_name = imdb.name
   gt_roidb = imdb.gt_roidb()
   with tf.Graph().as_default():
-    # image_reader = ImageReader(imdb.image_ext)
+    image_reader = ImageReader(imdb.image_ext)
     with tf.Session('') as sess:
       for shard_id in range(_NUM_SHARDS):
         output_filename = _get_dataset_filename(
           dataset_dir, split_name, shard_id)
-        with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
+        options = tf.python_io.TFRecordOptions(TFRecordCompressionType.ZLIB)
+        with tf.python_io.TFRecordWriter(output_filename, options=options) as tfrecord_writer:
           start_ndx = shard_id * num_per_shard
           end_ndx = min((shard_id + 1) * num_per_shard, imdb.num_images)
           for i in range(start_ndx, end_ndx):
@@ -100,16 +102,18 @@ def convert_data(imdb):
               i + 1, imdb.num_images, shard_id))
             sys.stdout.flush()
             # Read the filename:
-            # image_data = tf.gfile.FastGFile(imdb.image_path_at(i), 'r').read()
-            # height, width = image_reader.read_image_dims(sess, image_data)
-            image_data = cv2.imread(imdb.image_path_at(i))
-            width, height = image_data.shape[:2]
+            image_data = tf.gfile.FastGFile(imdb.image_path_at(i), 'rb').read()
+            height, width = image_reader.read_image_dims(sess, image_data)
+            # image_data = cv2.imread(imdb.image_path_at(i))
+            # image_data = image_data.astype(np.uint8)
+            # width, height = image_data.shape[:2]
+            # assert image_data.size == width * height * 3
             gt_boxes = gt_roidb[i]['boxes']
             gt_classes = gt_roidb[i]['gt_classes']
             gt_boxes_with_class = np.empty((gt_boxes.shape[0], 5), dtype=np.float32)
             gt_boxes_with_class[:, 0:4] = gt_boxes
             gt_boxes_with_class[:, 4] = gt_classes
-            example = _image_to_tfexample(image_data.tostring(), six.b(imdb.image_ext),
+            example = _image_to_tfexample(image_data, six.b(imdb.image_ext),
                                 height, width, gt_boxes.shape[0],
                                 gt_boxes_with_class.tostring())
             tfrecord_writer.write(example.SerializeToString())

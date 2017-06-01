@@ -202,25 +202,27 @@ def preprocess_for_training(image, gt_boxes):
             lambda: (image, gt_boxes))
 
   ## min size resizing
-  random_scale_inds = random.randint(0, high=len(cfg.TRAIN.SCALES))
-  image_min_size = cfg.SCALES[random_scale_inds]
+  random_scale_inds = random.randint(0, len(cfg.TRAIN.SCALES) - 1)
+  image_min_size = cfg.TRAIN.SCALES[random_scale_inds]
   new_ih, new_iw =_smallest_size_at_least(ih, iw, image_min_size)
   image = tf.expand_dims(image, 0)
   image = tf.image.resize_bilinear(image, [new_ih, new_iw], align_corners=False)
   image = tf.squeeze(image, axis=[0])
 
-
   scale_ratio = tf.to_float(new_ih) / tf.to_float(ih)
   gt_boxes = resize_gt_boxes(gt_boxes, scale_ratio)
 
+  ## rgb to bgr
+  image = tf.reverse(image, axis=[-1])
+
   ## zero mean image
   image = tf.cast(image, tf.float32)
-  image = image / 256.0
-  image = (image - 0.5) * 2.0
-  image = tf.expand_dims(image, axis=0)
+  # image = image - cfg.PIXEL_MEANS
+  mean = tf.constant(cfg.PIXEL_MEANS, dtype=tf.float32)
+  mean = tf.reshape(mean, [1, 1, 3])
+  image = image - mean
 
-  ## rgb to bgr
-  # image = tf.reverse(image, axis=[-1])
+  image = tf.expand_dims(image, axis=0)
 
   return image, gt_boxes
 
@@ -237,13 +239,15 @@ def preprocess_for_test(image, gt_boxes):
   scale_ratio = tf.to_float(new_ih) / tf.to_float(ih)
   gt_boxes = resize_gt_boxes(gt_boxes, scale_ratio)
 
-  ## zero mean image
-  image = tf.cast(image, tf.float32)
-  image = image / 256.0
-  image = (image - 0.5) * 2.0
-  image = tf.expand_dims(image, axis=0)
-
   ## rgb to bgr
   image = tf.reverse(image, axis=[-1])
 
+  ## zero mean image
+  image = tf.cast(image, tf.float32)
+  # image = image / 256.0
+  # image = (image - 0.5) * 2.0
+  image = tf.expand_dims(image, axis=0)
+  mean = tf.constant(cfg.PIXEL_MEANS, dtype=tf.float32)
+  mean = tf.reshape(mean, [1, 1, 3])
   return image, gt_boxes
+
